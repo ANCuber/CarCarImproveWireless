@@ -1,6 +1,7 @@
 /*
  * BLE GATT Client for HM-10 Module
- * Connects to device "sallen_hm10" and interacts with its characteristic
+ * Connects to the HM-10 whose name is stored in NVS (default "HM10_Mega")
+ * and bridges its 0xFFE1 characteristic to UART0
  */
 
 #include <stdio.h>
@@ -71,15 +72,12 @@ static struct gattc_profile_inst gl_profile_tab[PROFILE_NUM] = {
 static bool connect = false;      // set when the target is found; blocks a second open
 static bool link_ready = false;   // set once notifications are enabled; data can flow both ways
 static bool get_service = false;
-// static esp_gatt_srvc_id_t remote_service_id;
-// static esp_gatt_id_t remote_char_id;
 
 // Target device address (will be filled during scan)
 static esp_bd_addr_t target_device_addr;
-// static bool target_device_found = false;
 
 // Target device name (loaded from NVS)
-static char target_device_name[MAX_DEVICE_NAME_LEN] = "sallen_hm10";  // Default value
+static char target_device_name[MAX_DEVICE_NAME_LEN] = "HM10_Mega";  // Default value
 
 // UART data buffer
 static uint8_t uart_data[UART_BUF_SIZE];
@@ -244,10 +242,7 @@ static void uart_rx_task(void *arg)
 
             // Send only once notifications are enabled (characteristic found, link ready)
             if (link_ready) {
-                // Log sent data with bt_com TAG
-                // ESP_LOGI(TAG_BT_COM, "%s", uart_data);
-
-                // Send data to BLE characteristic
+                // Send data to BLE characteristic (sent data is not logged)
                 esp_ble_gattc_write_char(
                     gl_profile_tab[PROFILE_A_APP_ID].gattc_if,
                     gl_profile_tab[PROFILE_A_APP_ID].conn_id,
@@ -481,28 +476,13 @@ static void gattc_profile_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_
             ESP_LOGI(TAG, "READ char success:");
             ESP_LOG_BUFFER_HEX(TAG, p_data->read.value, p_data->read.value_len);
             ESP_LOGI(TAG, "Read data (string): %.*s", p_data->read.value_len, p_data->read.value);
-            
-            // Write example data to the characteristic
-            // vTaskDelay(1000 / portTICK_PERIOD_MS);
-            // char write_data[] = "Hello from ESP32!";
-            // ESP_LOGI(TAG, "Writing to characteristic...");
-            // esp_ble_gattc_write_char(gattc_if,
-            //                         gl_profile_tab[PROFILE_A_APP_ID].conn_id,
-            //                         gl_profile_tab[PROFILE_A_APP_ID].char_handle,
-            //                         sizeof(write_data),
-            //                         (uint8_t *)write_data,
-            //                         ESP_GATT_WRITE_TYPE_RSP,
-            //                         ESP_GATT_AUTH_REQ_NONE);
         }
         break;
 
     case ESP_GATTC_WRITE_CHAR_EVT:
+        // A successful write logs nothing: only bt_com records carry data to the PC
         if (p_data->write.status != ESP_GATT_OK) {
             ESP_LOGE(TAG, "WRITE char failed, error status = %x", p_data->write.status);
-        } else {
-            // ESP_LOGI(TAG, "WRITE char success");
-            // ESP_LOGI(TAG, "Connection active - waiting for notifications...");
-            // ESP_LOGI(TAG, "Send data to the HM-10 to see notifications here!");
         }
         break;
 
@@ -635,12 +615,6 @@ static void esp_gattc_cb(esp_gattc_cb_event_t event, esp_gatt_if_t gattc_if, esp
 
 void app_main(void)
 {
-    // // Set default log level to WARNING
-    // esp_log_level_set("*", ESP_LOG_WARN);
-    
-    // // Set bt_com log level to INFO to see BLE communication
-    // esp_log_level_set(TAG_BT_COM, ESP_LOG_INFO);
-    
     ESP_LOGI(TAG, "Starting BLE GATT Client for HM-10");
 
     // Initialize UART first for user feedback
