@@ -14,7 +14,7 @@ The application uses the GAP (Generic Access Profile) callback to scan for devic
 esp_gap_cb() -> ESP_GAP_BLE_SCAN_RESULT_EVT
 ```
 
-When a device is found, it checks the advertised name against `target_device_name` (loaded from NVS at boot; default "sallen_hm10"). If matched, it stops scanning and initiates a connection.
+When a device is found, it checks the advertised name against `target_device_name` (loaded from NVS at boot; default "HM10_Mega"). If matched, it stops scanning and initiates a connection.
 
 Scan parameters: active scan, interval `0x50` (50 ms), window `0x30` (30 ms). A scan round lasts 30 s. A round that ends without finding the target logs `Scan complete, <name> not found, scanning again` and starts the next round.
 

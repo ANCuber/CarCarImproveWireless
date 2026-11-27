@@ -19,6 +19,8 @@ This guide has two parts:
 - [Part 1: Chat demo](#part-1-chat-demo) sets up the HM-10 and runs a chat program, to check that everything works.
 - [Part 2: Using it in your own program](#part-2-using-it-in-your-own-program) shows the Python API for sending and receiving messages.
 
+[For developers](#for-developers), at the end, covers flashing the ESP32 and how the project is put together.
+
 ## What you need
 
 - Arduino Mega and an HM-10 module
@@ -37,7 +39,7 @@ cd CarCarImproveWireless
 pip install pyserial bleak
 ```
 
-`pyserial` is for the ESP32 bridge path and `bleak` is for the direct BLE path. If you use conda, `conda env create -f environment.yml` followed by `conda activate carcar` installs both.
+`pyserial` is for the ESP32 bridge path and `bleak` is for the direct BLE path.
 
 ### Step 2: Set up the HM-10
 
@@ -50,7 +52,7 @@ pip install pyserial bleak
    | TX        | RX3 (pin 15)     |
    | RX        | TX3 (pin 14)     |
 
-   This wiring is for the course's HM-10 board (the module sits on a black 6-pin base board). A bare HM-10 module needs 3.3 V on VCC and a voltage divider between the Mega's TX3 and the module's RX. If you buy your own boards, see [Buying HM-10 boards](#buying-hm-10-boards).
+   This wiring is for the course's HM-10 board (the module sits on a black 6-pin base board). A bare HM-10 module needs 3.3 V on VCC and a voltage divider between the Mega's TX3 and the module's RX; see [Buying HM-10 boards](#buying-hm-10-boards).
 
 2. Open [init_hm10/init_hm10.ino](init_hm10/init_hm10.ino) in Arduino IDE and change `CUSTOM_NAME` to a name of your own (at most 12 characters). Pick a name nobody else in the room uses.
 
@@ -224,30 +226,42 @@ The full list of calls is in [chat_hm10/hm10_esp32/README.md](chat_hm10/hm10_esp
 | `connect()` raises `ConnectionError: No reply from the ESP32` | Same cause: wrong serial port, or the ESP32 is not flashed. |
 | `connect()` returns `False`, or never returns | The ESP32 answers but has not found the HM-10. Check the same things as for `ESP32 is DISCONNECTED` above. |
 | `readline()` returns `""` | No complete line arrived in time. Check that the Arduino ends its messages with `\n` (`println`). |
-| `idf.py: command not found` when flashing | The ESP-IDF environment is not loaded in this terminal. See [Appendix: Flashing the ESP32](#appendix-flashing-the-esp32), part 2. |
+| `idf.py: command not found` when flashing | The ESP-IDF environment is not loaded in this terminal. See [Flashing the ESP32](#flashing-the-esp32), part 2. |
 | The serial port cannot be opened ("Access is denied", "Resource busy") | Another program has the port open. Close other serial monitors and other copies of the script. |
 | `chat_hm10-bleak.py` prints `Device not found` | Check that Bluetooth is on, the name matches, and the HM-10 is not already connected to an ESP32 or a phone. |
 | Messages do not arrive in the Serial Monitor | Set the Serial Monitor to 115200 baud and keep the `init_hm10` sketch on the Mega. |
 
 To check whether the HM-10 is advertising at all, scan for it with the nRF Connect app on a phone.
 
-## Buying HM-10 boards
+## For developers
 
-Check that the board has level shifters on TX and RX. Listings often say only "with base board", and many base boards have a voltage regulator but no level shifter. Ask the seller, or test one board when it arrives: put 5 V on VCC and leave the other pins open. If TX and RX read close to VCC (about 4.3 V on the course's board), the board has level shifters. If they read about 3.3 V, it has none, so add a voltage divider on the Mega's TX3.
+This section is for whoever prepares the hardware or changes the code. To use the system you do not need any of it.
 
-## More documentation
+### Repository layout
 
-- [chat_hm10/hm10_esp32/README.md](chat_hm10/hm10_esp32/README.md): full reference of the Python API
-- [chat_hm10/hm10_bleak/README.md](chat_hm10/hm10_bleak/README.md): the module behind the direct BLE demo
-- [esp32-hm10/README.md](esp32-hm10/README.md): ESP32 firmware, its AT commands and logs
-- [esp32-hm10/IMPLEMENTATION_NOTES.md](esp32-hm10/IMPLEMENTATION_NOTES.md): how the firmware works inside
-- [resource/DS-HM10.pdf](resource/DS-HM10.pdf): HM-10 datasheet with its AT command list
+```
+├── chat_hm10/
+│   ├── chat_hm10-esp32.py     # chat demo, ESP32 bridge
+│   ├── chat_hm10-bleak.py     # chat demo, direct BLE
+│   ├── hm10_esp32/            # Python API for the ESP32 bridge (pyserial)
+│   └── hm10_bleak/            # module behind the direct BLE demo (bleak)
+├── esp32-hm10/                # ESP32 firmware (ESP-IDF, C)
+├── init_hm10/                 # Arduino sketch that sets up an HM-10
+└── resource/                  # screenshots for this README, HM-10 datasheet
+```
 
-## Appendix: Flashing the ESP32
+### How the pieces talk
 
-You do not need this if you were given an ESP32 that is already flashed. It is here for whoever prepares the boards, and for re-flashing after a firmware change.
+- **HM-10**: a BLE module with one service, `0xFFE0`, and one characteristic, `0xFFE1`. Bytes written to the characteristic come out of its UART to the Arduino (9600 baud). Bytes from the Arduino go out as BLE notifications of at most 20 bytes.
+- **ESP32 firmware**: a BLE client. It scans for the HM-10 by name, connects, and reconnects by itself. It writes what it receives on its USB serial port (115200 baud) to the HM-10, at most 10 bytes at a time. It prints each notification as a log line tagged `bt_com`.
+- **`hm10_esp32`**: reads the serial port and keeps only the `bt_com` lines. Lines starting with `OK+` are replies to the AT commands that configure the ESP32 (`AT+NAME`, `AT+STATUS?`, `AT+RESET`); the rest is data from the Arduino.
+- **`hm10_bleak`**: the PC's own Bluetooth adapter takes the place of the ESP32. It writes to and gets notifications from `0xFFE1` directly.
 
-### 1. Install ESP-IDF
+Data, AT commands, replies and the ESP32's other logs all share one serial port. `hm10_esp32` therefore depends on the firmware's log format; change the two together.
+
+### Flashing the ESP32
+
+#### 1. Install ESP-IDF
 
 Install ESP-IDF v6.1 with the ESP-IDF Installation Manager (`eim`). Version 5.3 and newer also work. The install downloads compilers and takes a while.
 
@@ -266,7 +280,7 @@ Install ESP-IDF v6.1 with the ESP-IDF Installation Manager (`eim`). Version 5.3 
 
 - **Linux**: A Linux user should figure things out themselves.
 
-### 2. Load the ESP-IDF environment in your terminal
+#### 2. Load the ESP-IDF environment in your terminal
 
 Installing ESP-IDF does not make `idf.py` available by itself. ESP-IDF keeps its own Python virtual environment and compilers, and you have to load them **in every new terminal** before using `idf.py`. If you skip this, you get `idf.py: command not found` (on Windows: `idf.py is not recognized`).
 
@@ -305,7 +319,7 @@ idf.py --version
 
 It prints `ESP-IDF v6.1`.
 
-### 3. Build and flash
+#### 3. Build and flash
 
 In the terminal where the environment is loaded, go to the firmware folder and build:
 
@@ -322,4 +336,22 @@ idf.py -p PORT flash
 
 Find the port as in Part 1, Step 3: for example `COM3` on Windows, `/dev/cu.usbserial-10` on macOS (`ls /dev/cu.*`), `/dev/ttyUSB0` on Linux.
 
-You do not need to set the HM-10 name here. The chat script and `connect()` set it for you. More about the firmware and its AT commands is in [esp32-hm10/README.md](esp32-hm10/README.md).
+The same firmware goes on every board. You do not need to set the HM-10 name here: it defaults to `HM10_Mega`, and the chat script and `connect()` change it for each user.
+
+To check a flashed board, watch its log with `idf.py -p PORT monitor` (exit with `Ctrl+]`). It prints `Starting BLE GATT Client for HM-10` on boot and `Scan started successfully` when it starts looking for the HM-10.
+
+### Buying HM-10 boards
+
+Check that the board has level shifters on TX and RX. Listings often say only "with base board", and many base boards have a voltage regulator but no level shifter. Ask the seller, or test one board when it arrives: put 5 V on VCC and leave the other pins open. If TX and RX read close to VCC (about 4.3 V on the course's board), the board has level shifters. If they read about 3.3 V, it has none, so add a voltage divider on the Mega's TX3.
+
+### Testing
+
+There are no automated tests. After a change, run the chat demo of Part 1 and the example of Part 2 on real hardware. Build the firmware with `idf.py build` and keep it free of compiler warnings.
+
+### More documentation
+
+- [chat_hm10/hm10_esp32/README.md](chat_hm10/hm10_esp32/README.md): full reference of the Python API
+- [chat_hm10/hm10_bleak/README.md](chat_hm10/hm10_bleak/README.md): the module behind the direct BLE demo
+- [esp32-hm10/README.md](esp32-hm10/README.md): firmware behaviour, AT commands, logs
+- [esp32-hm10/IMPLEMENTATION_NOTES.md](esp32-hm10/IMPLEMENTATION_NOTES.md): how the firmware works inside
+- [resource/DS-HM10.pdf](resource/DS-HM10.pdf): HM-10 datasheet with its AT command list

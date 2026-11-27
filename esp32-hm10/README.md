@@ -1,360 +1,81 @@
-# ESP32-HM10 BLE Bridge
+# esp32-hm10: ESP32 firmware for the HM-10 bridge
 
-A BLE GATT Client implementation for ESP32 that connects to HM-10 Bluetooth modules and provides a UART interface for bidirectional communication.
+This firmware turns an ESP32 into a bridge between a USB serial port and an HM-10 BLE module. The ESP32 is a BLE GATT client: it scans for the HM-10 with the configured name, connects, and passes data both ways.
 
-## Overview
+To install ESP-IDF, build and flash, see [For developers](../README.md#for-developers) in the project README. The firmware targets ESP-IDF v6.1 and also builds on 5.3 and newer.
 
-This project enables an ESP32 to act as a BLE bridge between a computer (via USB serial) and an HM-10 BLE module. It automatically discovers and connects to a configured HM-10 device, allowing transparent data transfer between UART and BLE.
+## Behaviour
 
-### Key Features
+- On boot it loads the target HM-10 name from NVS (the ESP32's non-volatile key-value flash storage). The default is `HM10_Mega`.
+- It scans in 30 s rounds until a device with that name is found, then connects, finds service `0xFFE0` and characteristic `0xFFE1`, and enables notifications.
+- After a disconnect it waits 2 s and scans again.
+- UART0 (the USB serial port) runs at 115200 baud, 8N1, no flow control.
 
-- ✅ Automatic BLE scanning and connection to HM-10 modules
-- ✅ UART interface at 115200 baud for computer communication
-- ✅ Bidirectional data transfer (UART ↔ BLE)
-- ✅ AT command support for device configuration
-- ✅ Persistent storage of target device name (NVS)
-- ✅ Automatic reconnection on disconnect
-- ✅ BLE notification handling
+## Data
 
-## Hardware Requirements
+| Direction | How |
+|-----------|-----|
+| PC → HM-10 | Bytes received on UART are written to `0xFFE1` in chunks of at most 10 bytes, one chunk about every 25 to 35 ms. Nothing is logged on success. |
+| HM-10 → PC | Each notification (at most 20 bytes) is printed as one log line with the tag `bt_com`. |
 
-- **ESP32 Development Board** (any ESP32 module with USB serial)
-- **HM-10 BLE Module** (configured and powered on)
-- **USB Cable** for programming and serial communication
+Data sent before the link is ready is dropped, and the ESP32 logs `HM-10 link not ready, dropped N bytes`.
 
-## Software Requirements
+## AT commands
 
-- [ESP-IDF v6.1](https://docs.espressif.com/projects/esp-idf/en/v6.1/esp32/get-started/) (any version from 5.3 also builds)
-- Python 3.7+ (for ESP-IDF tools)
+The ESP32 handles these itself. They are never forwarded to the HM-10. Send them without a line ending. Replies are `bt_com` log lines.
 
-## Installation
+| Command | Reply | Meaning |
+|---------|-------|---------|
+| `AT+NAME?` | `OK+NAME<name>` | The target HM-10 name. |
+| `AT+NAME<name>` | `OK+SET<name>` | Saves a new target name (at most 25 bytes; an HM-10 name is at most 12) to NVS. The ESP32 does not reboot or drop a link it already has: send `AT+RESET` to connect to the new target. |
+| `AT+STATUS?` | `OK+CONN` or `OK+UNCONN` | `OK+CONN` means the link is ready for data: connected and notifications enabled. This is about 0.8 s after the scan finds the HM-10. |
+| `AT+RESET` | `OK+RESET` | Restarts the ESP32. Reconnecting takes about 6 s. |
 
-### 1. Set up ESP-IDF
+A command is recognised only when it arrives on its own, not in the same UART read as other bytes. The Python module [`hm10_esp32`](../chat_hm10/hm10_esp32/README.md) leaves a gap around each command for this reason.
 
-Follow the [ESP-IDF Getting Started Guide](https://docs.espressif.com/projects/esp-idf/en/latest/esp32/get-started/index.html) to install the ESP-IDF framework.
+## Logs
 
-### 2. Clone and Navigate to Project
+| Tag | Content |
+|-----|---------|
+| `bt_com` | Data from the HM-10 and `OK+...` replies. This is the channel the Python module reads. |
+| `GATTC_HM10` | Everything else: scan, connection, errors. |
 
-```bash
-git clone https://github.com/ANCuber/CarCarImproveWireless.git
-cd CarCarImproveWireless/esp32-hm10
-```
-
-### 3. Configure the Project (Optional)
-
-```bash
-idf.py menuconfig
-```
-
-### 4. Build the Project
-
-```bash
-idf.py build
-```
-
-### 5. Flash to ESP32
-
-Connect your ESP32 board via USB and run:
-
-```bash
-idf.py -p /dev/ttyUSB0 flash
-```
-
-*(Replace `/dev/ttyUSB0` with your ESP32's serial port)*
-
-### 6. Monitor Output
-
-```bash
-idf.py -p /dev/ttyUSB0 monitor
-```
-
-To exit the monitor, press `Ctrl+]`.
-
-**Combined flash and monitor:**
-```bash
-idf.py -p /dev/ttyUSB0 flash monitor
-```
-
-## Usage
-
-### Initial Setup
-
-1. **Power on your HM-10 module** - Ensure it's advertising and within range
-2. **Flash the ESP32** - The default target device name is `sallen_hm10`
-3. **Monitor the serial output** - You'll see scanning and connection logs
-
-### Changing Target Device
-
-If you want to connect to a different HM-10 device:
-
-```
-AT+NAME<device_name>
-```
-
-**Example:**
-```
-AT+NAMEmy_hm10
-```
-
-**Response:**
-```
-OK+SETmy_hm10
-```
-
-The device name is saved to non-volatile storage and persists across reboots. The ESP32 does not reboot or drop a link it already has: send `AT+RESET` to make it connect to the new target.
-
-### Checking Configuration
-
-**Query current target device name:**
-```
-AT+NAME?
-```
-
-**Response:**
-```
-OK+NAMEHM10_Mega
-```
-
-**Query connection status:**
-```
-AT+STATUS?
-```
-
-**Response:**
-- `OK+CONN` - Connected to HM-10
-- `OK+UNCONN` - Not connected
-
-### Resetting the ESP32
-
-```
-AT+RESET
-```
-
-**Response:**
-```
-OK+RESET
-```
-
-The ESP32 will restart after a short delay.
-
-### Sending Data to HM-10
-
-Once connected, any data you send through the serial terminal (except AT commands) will be forwarded to the HM-10 module:
-
-```
-Hello from computer!
-```
-
-The data is transmitted via BLE Write operations to the HM-10 characteristic.
-
-### Receiving Data from HM-10
-
-Any notifications from the HM-10 module are printed to the serial monitor with the `bt_com` tag:
+A `bt_com` line looks like this on the wire, with colour codes around it:
 
 ```
 I (12345) bt_com: Hello from HM-10!
 ```
 
-## Communication Protocol
+The Python module depends on this exact format: the tag `bt_com`, INFO level, and log colours on (`CONFIG_LOG_COLORS=y` in `sdkconfig.defaults`). Changing any of them breaks it.
 
-### BLE Service and Characteristic
-
-- **Service UUID:** `0xFFE0` (HM-10 default service)
-- **Characteristic UUID:** `0xFFE1` (HM-10 default characteristic)
-- **Characteristic Properties:** Read, Write, Notify
-
-### Data Limitations
-
-- **HM-10 MTU:** 23 bytes (20 bytes usable payload per packet)
-- **UART Buffer:** 1024 bytes
-- **Computer → HM-10:** data is written in chunks of at most 10 bytes
-- **HM-10 → computer:** messages longer than 20 bytes are fragmented by the HM-10 and received as multiple notifications
-
-## AT Commands Reference
-
-| Command | Description | Example | Response |
-|---------|-------------|---------|----------|
-| `AT+NAME<name>` | Set target device name | `AT+NAMEmy_device` | `OK+SETmy_device` |
-| `AT+NAME?` | Query target device name | `AT+NAME?` | `OK+NAMEsallen_hm10` |
-| `AT+STATUS?` | Query connection status | `AT+STATUS?` | `OK+CONN` or `OK+UNCONN` |
-| `AT+RESET` | Reset ESP32 | `AT+RESET` | `OK+RESET` |
-
-**Note:** AT commands are processed locally by the ESP32 and not forwarded to the HM-10.
-
-`OK+CONN` means the link is ready for data: the HM-10 was found, connected, and its notifications are enabled. Data sent over UART before that is dropped, and the ESP32 logs `HM-10 link not ready, dropped N bytes`.
+To watch the logs, run `idf.py -p PORT monitor` (exit with `Ctrl+]`). Add `--print_filter "bt_com:I"` to see only the data.
 
 ## Configuration
 
-### Default Settings
+- **Default target name**: `target_device_name` in [main/main.c](main/main.c). It is used only until a name is saved with `AT+NAME`. After that the name in NVS wins, even across reflashes. `idf.py erase-flash` clears it.
+- **UUIDs**: `REMOTE_SERVICE_UUID` and `REMOTE_NOTIFY_CHAR_UUID` in `main.c`.
+- **Build settings**: put lasting settings in `sdkconfig.defaults`, then regenerate `sdkconfig`. `sdkconfig` is tracked.
 
-```c
-// Target device name (can be changed via AT+NAME command)
-"sallen_hm10"
-
-// UART Configuration
-UART_PORT_NUM   = UART_NUM_0 (USB Serial)
-UART_BAUD_RATE  = 115200
-UART_DATA_BITS  = 8
-UART_PARITY     = None
-UART_STOP_BITS  = 1
-UART_FLOW_CTRL  = None
-
-// BLE Service UUIDs
-SERVICE_UUID    = 0xFFE0
-CHAR_UUID       = 0xFFE1
-```
-
-### Modifying Default Device Name
-
-Edit the default device name in [main/main.c](main/main.c):
-
-```c
-static char target_device_name[MAX_DEVICE_NAME_LEN] = "sallen_hm10";
-```
-
-This default is used only until a name is saved with `AT+NAME`. After that, the name in NVS (the ESP32's non-volatile key-value flash storage) wins, even across reflashes. Run `idf.py erase-flash` to clear it.
-
-### Changing UUIDs
-
-If your HM-10 uses different UUIDs, modify these macros:
-
-```c
-#define REMOTE_SERVICE_UUID        0xFFE0
-#define REMOTE_NOTIFY_CHAR_UUID    0xFFE1
-```
-
-## Project Structure
+## Files
 
 ```
 esp32-hm10/
-├── CMakeLists.txt                 # Top-level CMake configuration
-├── README.md                      # This file
-├── IMPLEMENTATION_NOTES.md        # Detailed technical notes
-├── sdkconfig                      # ESP-IDF configuration
-├── sdkconfig.defaults             # Default configuration values
 ├── main/
-│   ├── CMakeLists.txt             # Main component CMake file
-│   └── main.c                     # Application entry point
-└── build/                         # Build output directory
+│   ├── main.c               # the whole application
+│   └── CMakeLists.txt
+├── CMakeLists.txt
+├── sdkconfig.defaults       # settings that differ from the ESP-IDF defaults
+├── sdkconfig                # full configuration generated by ESP-IDF v6.1
+├── IMPLEMENTATION_NOTES.md  # event sequence, buffers, MTU
+└── .clangd                  # editor setting for clangd
 ```
-
-## How It Works
-
-### Connection Flow
-
-1. **Initialization** → ESP32 initializes BLE stack and UART
-2. **Scanning** → Scans for BLE devices advertising nearby
-3. **Discovery** → Finds HM-10 device matching target name
-4. **Connection** → Connects to HM-10 and negotiates MTU
-5. **Service Discovery** → Searches for service 0xFFE0
-6. **Characteristic Discovery** → Finds characteristic 0xFFE1
-7. **Enable Notifications** → Writes to CCCD to enable notifications
-8. **Data Transfer** → Bidirectional communication established
-
-### Data Flow
-
-**Computer → ESP32 → HM-10:**
-```
-UART RX → uart_rx_task() → esp_ble_gattc_write_char() → HM-10
-```
-
-**HM-10 → ESP32 → Computer:**
-```
-HM-10 → ESP_GATTC_NOTIFY_EVT → ESP_LOGI() → UART TX
-```
-
-### Event-Driven Architecture
-
-The application uses ESP-IDF's event-driven BLE stack:
-- **GAP events** handle scanning, connection, and disconnection
-- **GATT events** handle service discovery, reads, writes, and notifications
-- **UART task** runs continuously to read user input
 
 ## Troubleshooting
 
-### ESP32 doesn't find the HM-10
+| Problem | What to check |
+|---------|---------------|
+| `AT+STATUS?` keeps replying `OK+UNCONN` | The log shows `Scan complete, <name> not found, scanning again` for each missed round. Check that the HM-10 is powered, that `AT+NAME?` matches its name, and that no other device is connected to it. The nRF Connect phone app shows whether it is advertising. |
+| No reply to AT commands | Check the port and the baud rate (115200), and that the command was sent without a line ending. |
+| Data sent from the PC does not arrive | Check `AT+STATUS?`, and look for `link not ready` or `WRITE char failed` in the log. |
 
-**Possible causes:**
-- HM-10 is not powered on or advertising
-- Device name doesn't match target name
-- HM-10 is already connected to another device
-
-**Solutions:**
-1. Verify HM-10 is powered and advertising (check with nRF Connect app)
-2. Check device name: `AT+NAME?`
-3. Set correct device name: `AT+NAME<correct_name>`
-4. Ensure HM-10 is not connected elsewhere
-
-### Connection drops frequently
-
-**Possible causes:**
-- Weak signal / distance too far
-- Power supply issues
-- RF interference
-
-**Solutions:**
-1. Move devices closer together
-2. Check power supply stability
-3. Reduce interference from other 2.4 GHz devices
-
-### Data is garbled or incomplete
-
-**Possible causes:**
-- Baud rate mismatch
-- Buffer overflow
-- Character encoding issues
-
-**Solutions:**
-1. Verify UART is set to 115200 baud
-2. Reduce data transmission rate
-3. Ensure data is valid UTF-8
-
-### No notifications received
-
-**Possible causes:**
-- HM-10 not sending data
-- Notifications not properly enabled
-- Connection lost
-
-**Solutions:**
-1. Check connection status: `AT+STATUS?`
-2. Verify characteristic has notify property
-3. Check ESP32 logs for GATTC events
-
-## Logging
-
-The application uses two log tags:
-
-- **`GATTC_HM10`** - System logs (initialization, connection, errors)
-- **`bt_com`** - Data received from the HM-10 and the `OK+...` replies to AT commands. Data sent to the HM-10 is not logged.
-
-### Filtering Logs with ESP-IDF Monitor
-
-To filter logs by tag, use the `idf.py monitor` filter feature:
-
-```bash
-idf.py monitor --print_filter bt_com:I
-```
-
-### Filtering Raw COM Port Output
-
-When using external serial terminals (PuTTY, minicom, screen, etc.), the raw output contains many system logs. To filter out unrelated messages and see only BLE communication data, look for lines with the prefix:
-
-```
-I (<timestamp>) bt_com: 
-```
-
-**Example:**
-```
-I (12345) bt_com: Hello from HM-10!
-```
-
-## Development Notes
-
-For detailed implementation information, including event sequences, memory management, and customization points, see [IMPLEMENTATION_NOTES.md](IMPLEMENTATION_NOTES.md).
-
-## Related
-
-- [Project README](../README.md) - setup from zero, for users of the bridge
-- [Python module for this bridge](../chat_hm10/hm10_esp32/README.md)
-- [HM-10 datasheet](../resource/DS-HM10.pdf)
+See [IMPLEMENTATION_NOTES.md](IMPLEMENTATION_NOTES.md) for how the code works inside.
