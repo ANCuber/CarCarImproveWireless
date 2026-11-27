@@ -16,3 +16,12 @@ dependencies.lock
 
 # Local Python virtual environments
 **/*venv*/
+
+# Local notes and AI-assistant files (not part of the project)
+CLAUDE.md
+CLAUDE.local.md
+AGENTS.md
+.claude/
+
+# OS files
+.DS_Store

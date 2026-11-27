@@ -36,7 +36,8 @@ Follow the [ESP-IDF Getting Started Guide](https://docs.espressif.com/projects/e
 ### 2. Clone and Navigate to Project
 
 ```bash
-cd esp32-hm10
+git clone https://github.com/ANCuber/CarCarImproveWireless.git
+cd CarCarImproveWireless/esp32-hm10
 ```
 
 ### 3. Configure the Project (Optional)
@@ -100,7 +101,7 @@ AT+NAMEmy_hm10
 OK+SETmy_hm10
 ```
 
-The device name is saved to non-volatile storage and persists across reboots.
+The device name is saved to non-volatile storage and persists across reboots. The ESP32 does not reboot or drop a link it already has: send `AT+RESET` to make it connect to the new target.
 
 ### Checking Configuration
 
@@ -166,7 +167,8 @@ I (12345) bt_com: Hello from HM-10!
 
 - **HM-10 MTU:** 23 bytes (20 bytes usable payload per packet)
 - **UART Buffer:** 1024 bytes
-- **Messages longer than 20 bytes** are fragmented by the HM-10 and received as multiple notifications
+- **Computer → HM-10:** data is written in chunks of at most 10 bytes
+- **HM-10 → computer:** messages longer than 20 bytes are fragmented by the HM-10 and received as multiple notifications
 
 ## AT Commands Reference
 
@@ -212,8 +214,6 @@ static char target_device_name[MAX_DEVICE_NAME_LEN] = "sallen_hm10";
 
 This default is used only until a name is saved with `AT+NAME`. After that, the name in NVS (the ESP32's non-volatile key-value flash storage) wins, even across reflashes. Run `idf.py erase-flash` to clear it.
 
-> **Note:** `main/Kconfig.projbuild` and `sdkconfig.defaults` define `CONFIG_HM10_DEVICE_NAME` (`HMSoft`) and `CONFIG_HM10_DEVICE_MAC`, but `main.c` never reads them. Setting them in `idf.py menuconfig` has no effect.
-
 ### Changing UUIDs
 
 If your HM-10 uses different UUIDs, modify these macros:
@@ -234,7 +234,6 @@ esp32-hm10/
 ├── sdkconfig.defaults             # Default configuration values
 ├── main/
 │   ├── CMakeLists.txt             # Main component CMake file
-│   ├── Kconfig.projbuild          # Project configuration menu
 │   └── main.c                     # Application entry point
 └── build/                         # Build output directory
 ```
@@ -327,7 +326,7 @@ The application uses ESP-IDF's event-driven BLE stack:
 The application uses two log tags:
 
 - **`GATTC_HM10`** - System logs (initialization, connection, errors)
-- **`bt_com`** - BLE communication data (sent/received messages)
+- **`bt_com`** - Data received from the HM-10 and the `OK+...` replies to AT commands. Data sent to the HM-10 is not logged.
 
 ### Filtering Logs with ESP-IDF Monitor
 
@@ -354,19 +353,8 @@ I (12345) bt_com: Hello from HM-10!
 
 For detailed implementation information, including event sequences, memory management, and customization points, see [IMPLEMENTATION_NOTES.md](IMPLEMENTATION_NOTES.md).
 
-## License
+## Related
 
-This project is provided as-is for educational and development purposes.
-
-## Contributing
-
-Contributions are welcome! Please ensure code follows ESP-IDF coding standards and includes appropriate documentation.
-
-## Support
-
-For issues or questions:
-1. Check the [IMPLEMENTATION_NOTES.md](IMPLEMENTATION_NOTES.md) for technical details
-2. Review ESP-IDF documentation for BLE GATT Client APIs
-3. Use nRF Connect or similar tools to debug BLE communication
-
----
+- [Project README](../README.md) - setup from zero, for users of the bridge
+- [Python module for this bridge](../chat_hm10/hm10_esp32/README.md)
+- [HM-10 datasheet](../resource/DS-HM10.pdf)

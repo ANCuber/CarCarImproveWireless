@@ -16,6 +16,12 @@ esp_gap_cb() -> ESP_GAP_BLE_SCAN_RESULT_EVT
 
 When a device is found, it checks the advertised name against `target_device_name` (loaded from NVS at boot; default "sallen_hm10"). If matched, it stops scanning and initiates a connection.
 
+Scan parameters: active scan, interval `0x50` (50 ms), window `0x30` (30 ms). A scan round lasts 30 s. A round that ends without finding the target logs `Scan complete, <name> not found, scanning again` and starts the next round.
+
+Two flags track the link:
+- `connect` is set when the scan finds the target. It only stops a second `esp_ble_gattc_open()`.
+- `link_ready` is set when the CCCD write succeeds (notifications enabled). `AT+STATUS?` reports `OK+CONN` and UART data is forwarded only when `link_ready` is set.
+
 ### 2. Connection Flow
 
 ```
@@ -69,14 +75,14 @@ esp_ble_gattc_write_char(gattc_if, conn_id, char_handle, value_len, value, write
 The ESP32 requests a large MTU to support longer messages:
 
 ```c
-// In app_main() - line 540
+// In app_main()
 esp_ble_gatt_set_local_mtu(500);  // Request 500-byte MTU
 ```
 
 **MTU Negotiation:**
 1. ESP32 requests 500-byte MTU via `esp_ble_gatt_set_local_mtu()`
-2. Upon connection, sends MTU request: `esp_ble_gattc_send_mtu_req()` (line 159)
-3. Negotiated MTU is logged in `ESP_GATTC_CFG_MTU_EVT` (line 187)
+2. Upon connection, sends MTU request: `esp_ble_gattc_send_mtu_req()`
+3. Negotiated MTU is logged in `ESP_GATTC_CFG_MTU_EVT`
 
 **HM-10 Limitation:**
 
@@ -93,7 +99,8 @@ Despite the ESP32's 500-byte MTU request, the **HM-10 module is limited to 20-by
 **Buffer Sizes:**
 - UART buffer: 1024 bytes (can receive long messages from computer)
 - BLE packet: 20 bytes (HM-10 limitation)
-- Each fragment logged separately with `bt_com` tag
+- Data from the computer is written to the HM-10 in chunks of at most 10 bytes
+- Each received fragment is logged separately with the `bt_com` tag
 
 ## UART VCP Layer
 
@@ -110,18 +117,19 @@ UART uses the default USB-Serial port (UART0) with the following settings:
 Configuration: 8 data bits, no parity, 1 stop bit, no flow control.
 
 **Buffer capacity:**
-- RX buffer: 2048 bytes (UART_BUF_SIZE × 2, set in `uart_driver_install()`)
+- RX and TX driver buffers: 2048 bytes each (UART_BUF_SIZE × 2, set in `uart_driver_install()`)
 - Static buffer: 1024 bytes (`uart_data[UART_BUF_SIZE]`)
-- Reads up to 1023 bytes per cycle (UART_BUF_SIZE - 1)
+- Reads at most 10 bytes per cycle (an `AT+NAME` command reads on, up to 32 bytes in total)
 
 ### 7. UART RX Task
 
 The `uart_rx_task()` function runs as a FreeRTOS task that:
 
-1. Reads bytes from UART with 20ms timeout
-2. Checks if BLE is connected (`connect` flag and valid `char_handle`)
-3. Calls `esp_ble_gattc_write_char()` to send data to HM-10
-4. Delays 100ms between read cycles
+1. Reads at most 10 bytes from UART with a 10 ms timeout
+2. Handles `AT+RESET`, `AT+NAME?`, `AT+STATUS?` and `AT+NAME<name>` itself (these are never forwarded)
+3. For other data, checks that the link is ready (`link_ready` flag)
+4. Calls `esp_ble_gattc_write_char()` to send the data to the HM-10, or logs `HM-10 link not ready, dropped N bytes`
+5. Delays 25 ms between read cycles
 
 ```c
 uart_rx_task() -> uart_read_bytes() -> esp_ble_gattc_write_char()
@@ -137,17 +145,17 @@ static const char* TAG_BT_COM = "bt_com";   // BLE communication data
 ```
 
 **Usage:**
-- `ESP_LOGI(TAG_BT_COM, ...)` - Data sent to BLE (TX)
-- `ESP_LOGE(TAG_BT_COM, ...)` - Data received from BLE (RX)
+- `ESP_LOGI(TAG_BT_COM, ...)` - Data received from the HM-10, and the `OK+...` replies to AT commands
+- Data sent to the HM-10 is not logged. Only a failed write logs an error (tag `GATTC_HM10`).
 
-The `ESP_LOGE` level is used for RX to make received data visually distinct (red color in terminal).
+The Python module `hm10_esp32` reads the `bt_com` records at INFO level with log colours on. Changing the tag, the level or `CONFIG_LOG_COLORS` breaks it.
 
 ### 9. BLE Notification Handling
 
 When `ESP_GATTC_NOTIFY_EVT` is received, the data is output using:
 
 ```c
-ESP_LOGE(TAG_BT_COM, "%.*s", p_data->notify.value_len, p_data->notify.value);
+ESP_LOGI(TAG_BT_COM, "%.*s", p_data->notify.value_len, p_data->notify.value);
 ```
 
 This outputs the raw notification data with the `bt_com` tag.
@@ -165,14 +173,14 @@ In `app_main()`:
 6. esp_ble_gattc_app_register()
 ```
 
-UART is initialized first to display the welcome banner before BLE initialization logs.
+UART is initialized first so that AT commands are accepted while the BLE stack starts.
 
 ### 11. Dependencies
 
-CMakeLists.txt requires the `driver` component for UART:
+`main/CMakeLists.txt` names the UART driver component directly. On IDF 6.x the legacy `driver` component no longer pulls it in:
 
 ```cmake
-PRIV_REQUIRES bt nvs_flash driver
+PRIV_REQUIRES bt nvs_flash esp_driver_uart esp_system
 ```
 
 ## UUID Format Note
@@ -216,8 +224,7 @@ Always `free()` these after use to prevent memory leaks.
 1. **Device Name**: Change the `target_device_name` default in `main.c`, or send `AT+NAME<name>` at runtime
 2. **Service UUID**: Change `REMOTE_SERVICE_UUID` macro
 3. **Characteristic UUID**: Change `REMOTE_NOTIFY_CHAR_UUID` macro
-4. **Write Data**: Modify the write data in `ESP_GATTC_READ_CHAR_EVT` case
-5. **Notification Handling**: Add custom logic in `ESP_GATTC_NOTIFY_EVT` case
+4. **Notification Handling**: Add custom logic in `ESP_GATTC_NOTIFY_EVT` case
 
 ## Common Issues and Solutions
 
