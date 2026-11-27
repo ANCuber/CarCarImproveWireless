@@ -5,6 +5,7 @@ import threading
 
 PORT = '/dev/ttyUSB1'
 EXPECTED_NAME = 'HM10_Mega'
+RETRY_INTERVAL = 1  # seconds between connection checks
 
 def background_listener(bridge):
     while True:
@@ -35,9 +36,25 @@ def main():
             sys.exit(1)
 
     # 2. Connection Check
-    status = bridge.get_status()
-    if status != "CONNECTED":
-        print(f"⚠️ ESP32 is {status}. Please ensure HM-10 is advertising. Exiting.")
+    # The ESP32 keeps scanning for the HM-10 on its own; ask it once per
+    # second until the link is up or the user presses Ctrl+C.
+    try:
+        last_status = None
+        while True:
+            status = bridge.get_status()
+            if status == "CONNECTED":
+                break
+            if status != last_status:
+                if status == "TIMEOUT":
+                    print(f"⚠️ No reply from the ESP32 on {PORT}. Check PORT and the firmware.")
+                else:
+                    print(f"⚠️ ESP32 is {status}. Please ensure HM-10 is advertising.")
+                print("Retrying every second (press Ctrl+C to quit)...")
+                last_status = status
+            time.sleep(RETRY_INTERVAL)
+    except KeyboardInterrupt:
+        bridge.close()
+        print("\nStopped waiting. Exiting.")
         sys.exit(0)
 
     print(f"✨ Ready! Connected to {EXPECTED_NAME}")
