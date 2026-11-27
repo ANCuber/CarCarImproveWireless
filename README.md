@@ -1,45 +1,39 @@
 # CarCarImprove Wireless
 
-Send text between your PC and an Arduino over Bluetooth Low Energy, using an HM-10 module on the Arduino. This replaces the HC-05 modules used on earlier CarCar cars.
-
-The PC can reach the HM-10 in two ways:
-
-| Path | You need | Used for |
-|------|----------|----------|
-| **ESP32 bridge** | An ESP32 board flashed with the `esp32-hm10` firmware. It plugs in over USB and does the Bluetooth part, so it works the same on every PC. | The chat demo, and the Python API for your own programs |
-| **Direct BLE** | A PC with Bluetooth 4.0 or newer | The chat demo only |
+Send text between your PC and an Arduino over Bluetooth Low Energy (BLE), using an HM-10 module on the Arduino.
 
 ```
 PC (Python) ── USB ── ESP32 ── BLE ── HM-10 ── Arduino Mega      ESP32 bridge
 PC (Python) ───────── BLE ─────────── HM-10 ── Arduino Mega      Direct BLE
 ```
 
-This guide has two parts:
+- **ESP32 bridge**: an ESP32 on a USB port does the Bluetooth part, so it works the same on every PC. Use this for your own programs.
+- **Direct BLE**: the PC's own Bluetooth talks to the HM-10. It is here as a demo only.
 
-- [Part 1: Chat demo](#part-1-chat-demo) sets up the HM-10 and runs a chat program, to check that everything works.
-- [Part 2: Using it in your own program](#part-2-using-it-in-your-own-program) shows the Python API for sending and receiving messages.
+Contents:
 
-[For developers](#for-developers), at the end, covers flashing the ESP32 and how the project is put together.
+- [Part 1: Chat demo](#part-1-chat-demo): set up the HM-10 and check that everything works.
+- [Part 2: Using it in your own program](#part-2-using-it-in-your-own-program): the Python API.
+- [Troubleshooting](#troubleshooting)
+- [For developers](#for-developers): flashing the ESP32 and how the project works inside. You do not need it to use the system.
 
 ## What you need
 
 - Arduino Mega and an HM-10 module
-- An ESP32 development board with the `esp32-hm10` firmware (ESP32 bridge path)
+- An ESP32 board with the `esp32-hm10` firmware (the one you were given is flashed already)
 - USB cables
 - [Arduino IDE](https://www.arduino.cc/en/software)
 - Python 3.12
 
 ## Part 1: Chat demo
 
-### Step 1: Get the code and install the Python packages
+### Step 1: Get the code
 
 ```bash
 git clone https://github.com/ANCuber/CarCarImproveWireless.git
 cd CarCarImproveWireless
 pip install pyserial bleak
 ```
-
-`pyserial` is for the ESP32 bridge path and `bleak` is for the direct BLE path.
 
 ### Step 2: Set up the HM-10
 
@@ -52,71 +46,65 @@ pip install pyserial bleak
    | TX        | RX3 (pin 15)     |
    | RX        | TX3 (pin 14)     |
 
-   This wiring is for the course's HM-10 board (the module sits on a black 6-pin base board). A bare HM-10 module needs 3.3 V on VCC and a voltage divider between the Mega's TX3 and the module's RX; see [Buying HM-10 boards](#buying-hm-10-boards).
+   This wiring is for the course's HM-10 board. For any other HM-10 board, read [Buying HM-10 boards](#buying-hm-10-boards) first.
 
-2. Open [init_hm10/init_hm10.ino](init_hm10/init_hm10.ino) in Arduino IDE and change `CUSTOM_NAME` to a name of your own (at most 12 characters). Pick a name nobody else in the room uses.
+2. Open [init_hm10/init_hm10.ino](init_hm10/init_hm10.ino) in Arduino IDE. Change `CUSTOM_NAME` to a name nobody else in the room uses (at most 12 characters).
 
    ![Edit the HM-10 name](resource/edit_init_hm10.png)
 
-3. Upload the sketch to the Mega, then open the Serial Monitor at **115200 baud**. The sketch finds the HM-10, resets it to factory settings, and sets the name. It ends with `Initialization Complete.`
+3. Upload the sketch and open the Serial Monitor at **115200 baud**. Wait for `Initialization Complete.`
 
    ![Result of init_hm10](resource/init_hm10_result.png)
 
-Leave this sketch on the Mega and keep the Serial Monitor open. After the setup it passes everything between the Serial Monitor and the HM-10, which you use to test the chat in the next step.
+Keep this sketch on the Mega and the Serial Monitor open. You chat through them in the next step.
 
 ### Step 3 (ESP32 bridge): Chat through the ESP32
 
-This needs an ESP32 that already has the `esp32-hm10` firmware. The one you were given is flashed already.
-
-1. Plug the ESP32 into your PC and find its serial port:
+1. Plug in the ESP32 and find its serial port:
    - **Windows**: Device Manager → "Ports (COM & LPT)" (連接埠), for example `COM3`
-   - **Linux**: `ls /dev/ttyUSB*`, for example `/dev/ttyUSB0`
    - **macOS**: `ls /dev/cu.usbserial*`, for example `/dev/cu.usbserial-0001`
+   - **Linux**: `ls /dev/ttyUSB*`, for example `/dev/ttyUSB0`
 
-   If no port shows up, install the CH340 USB driver. See the [CH340 driver installation guide](https://docs.google.com/presentation/u/0/d/1AppyLZE2i848UmYqMS-MMrL8-V6ORkutv9SstkJ2Zmo).
+   No port? Install the [CH340 USB driver](https://docs.google.com/presentation/u/0/d/1AppyLZE2i848UmYqMS-MMrL8-V6ORkutv9SstkJ2Zmo).
 
-2. In [chat_hm10/chat_hm10-esp32.py](chat_hm10/chat_hm10-esp32.py), set `PORT` to that serial port and `EXPECTED_NAME` to the HM-10 name from Step 2.
+2. In [chat_hm10/chat_hm10-esp32.py](chat_hm10/chat_hm10-esp32.py), set `PORT` to that port and `EXPECTED_NAME` to your HM-10 name.
 
    ![Edit chat_hm10-esp32.py](resource/edit_python_chat.png)
 
-3. Run the script from the `chat_hm10` folder:
+3. Run it:
 
    ```bash
    cd chat_hm10
    python chat_hm10-esp32.py
    ```
 
-   The script tells the ESP32 which HM-10 to look for and restarts the ESP32 if the name changed. It then checks the link once per second and prints `Ready! Connected to <name>` once the link is up. Press Ctrl+C to stop waiting.
+   It keeps trying until it prints `Ready! Connected to <name>`. This normally takes a few seconds. Press Ctrl+C to give up.
 
-4. Type a message and press Enter. It appears in the Arduino Serial Monitor. Text sent from the Serial Monitor appears in the terminal. Type `exit` to quit.
+4. Type a message and press Enter. It shows up in the Arduino Serial Monitor, and text sent from the Serial Monitor shows up in the terminal. Type `exit` to quit.
 
    ![Chat in the Arduino Serial Monitor](resource/chat_result_arduinoide.png)
    ![Chat in the terminal](resource/chat_result_python.png)
 
 ### Step 3 (Direct BLE): Chat without an ESP32
 
-1. Turn on Bluetooth on your PC. If an ESP32 bridge is powered nearby and set to your HM-10, unplug it: the HM-10 accepts one connection at a time.
-2. In [chat_hm10/chat_hm10-bleak.py](chat_hm10/chat_hm10-bleak.py), change `target_name="HM10_Mega"` in `main()` to the HM-10 name from Step 2.
-3. Run the script from the `chat_hm10` folder:
+1. Turn on Bluetooth on your PC and unplug the ESP32. The HM-10 accepts one connection at a time.
+2. In [chat_hm10/chat_hm10-bleak.py](chat_hm10/chat_hm10-bleak.py), change `target_name="HM10_Mega"` to your HM-10 name.
+3. Run it, then chat as above:
 
    ```bash
    cd chat_hm10
    python chat_hm10-bleak.py
    ```
 
-   It prints `Connected to <name>` when the link is up. Chat the same way as above.
-
-Direct BLE is here as a demo only. The API in Part 2 uses the ESP32 bridge.
-
 ## Part 2: Using it in your own program
 
-The chat script in Part 1 is for trying things out and for debugging. To exchange messages with the Arduino from your own Python program, use the `hm10_esp32` module. It talks through the ESP32 bridge and works like a serial port: open, connect, then `write()` and `read()`.
+The `hm10_esp32` module lets your own Python program exchange text with the Arduino through the ESP32. It works like a serial port: connect, then `write()` and `read()`.
 
-Before you start, set up the HM-10 as in Part 1, Step 2.
+Set up the HM-10 first, as in [Part 1, Step 2](#step-2-set-up-the-hm-10).
 
 ### Add the module to your project
 
-1. Copy the folder [chat_hm10/hm10_esp32](chat_hm10/hm10_esp32) into your own project, next to the script that will use it:
+1. Copy the folder [chat_hm10/hm10_esp32](chat_hm10/hm10_esp32) next to your script:
 
    ```
    your_project/
@@ -124,16 +112,10 @@ Before you start, set up the HM-10 as in Part 1, Step 2.
    └── your_script.py
    ```
 
-2. Install its one dependency:
+2. Install `pyserial`:
 
    ```bash
    pip install pyserial
-   ```
-
-3. Import it in your script:
-
-   ```python
-   from hm10_esp32 import HM10ESP32Bridge
    ```
 
 ### The calls
@@ -141,26 +123,18 @@ Before you start, set up the HM-10 as in Part 1, Step 2.
 | Call | What it does |
 |------|--------------|
 | `hm10 = HM10ESP32Bridge(port)` | Opens the ESP32's serial port, for example `'COM3'`. |
-| `hm10.connect(name, timeout=-1)` | Tells the ESP32 which HM-10 to use and waits until the link is ready. Returns `True` once connected, `False` if `timeout` seconds pass first. With `timeout=-1` it waits until connected. Raises `ConnectionError` if no ESP32 answers on the port. |
-| `hm10.write(data)` | Sends text (or bytes) to the Arduino. Returns the number of bytes sent. |
-| `hm10.read(size=-1, timeout=0)` | Returns the text received so far, at most `size` characters. Returns `""` if nothing has arrived. With a `timeout`, it waits up to that many seconds for something to arrive. |
-| `hm10.readline(timeout=-1)` | Waits for a full line and returns it, including the `\n` at its end. Returns `""` if `timeout` seconds pass first. |
-| `hm10.is_connected()` | `True` while the link to the HM-10 is ready. |
+| `hm10.connect(name, timeout=-1)` | Connects to the HM-10 called `name`. Returns `True` once connected, `False` on timeout. |
+| `hm10.write(data)` | Sends text to the Arduino. |
+| `hm10.read(size=-1, timeout=0)` | Returns the text received so far, at most `size` characters. Returns `""` if there is none. |
+| `hm10.readline(timeout=-1)` | Waits for a full line and returns it with its `\n`. Returns `""` on timeout. |
+| `hm10.is_connected()` | `True` while the link to the HM-10 is up. |
 | `hm10.close()` | Closes the serial port. |
 
-The values shown after `=` are the defaults, used when you leave the argument out. As with `size`, `-1` for `timeout` means "no limit":
-
-| Value | Meaning |
-|-------|---------|
-| `size=-1` | No limit: return everything received so far. A positive number, such as `size=5`, returns at most that many characters and keeps the rest for the next call. |
-| `timeout=0` | Do not wait: return at once, with `""` if nothing is there. |
-| `timeout=-1` | Wait with no time limit, until the data arrives (for `connect()`: until connected). Stop it with Ctrl+C. |
-
-Any other `timeout`, such as `timeout=3`, waits at most that many seconds.
+`timeout` is in seconds. `timeout=0` returns at once and `timeout=-1` waits with no limit. `size=-1` means everything. The values after `=` are the defaults.
 
 ### Example
 
-The Arduino adds 1 to every number it receives. Upload this sketch to the Mega (the HM-10 stays wired as in Part 1, Step 2):
+The Arduino adds 1 to every number it receives. Upload this sketch to the Mega:
 
 ```cpp
 void setup() {
@@ -208,30 +182,27 @@ Expected output:
 
 ### Things to know
 
-- **Mark the end of each message.** BLE delivers a long message in pieces of up to 20 bytes, so one `read()` can return half a message. End every message with `\n` and use `readline()` on the PC and `readStringUntil('\n')` on the Arduino, as in the example.
-- **Polling instead of waiting.** In a loop that also does other work, call `hm10.read()` with no timeout. It returns at once, with `""` when nothing has arrived.
-- **Text only, at a low rate.** The link carries UTF-8 text at roughly 250 bytes per second. Keep messages short.
-- **`OK+CONN` and `OK+LOST` on the Arduino.** After `init_hm10`, the HM-10 prints these to `Serial3` when a PC connects or disconnects, with no `\n` after them. They can end up in front of your first message, so remove them as the example does. You can also use them to know when a PC is there.
-- **Messages starting with `OK+`** sent from the Arduino are treated as replies from the ESP32 and do not reach `read()`. Do not start your own messages with `OK+`.
+- **End every message with `\n`**, and read with `readline()` on the PC and `readStringUntil('\n')` on the Arduino. A long message arrives in pieces, so a plain `read()` can return half of it.
+- **To check for data without waiting**, call `hm10.read()`. It returns `""` when nothing has arrived.
+- **Keep messages short.** The link carries text at about 250 bytes per second.
+- **On the Arduino, remove `OK+CONN` and `OK+LOST`** as the example does. The HM-10 prints them when a PC connects or disconnects.
+- **Do not start your own messages with `OK+`.** The module would take them for replies from the ESP32.
 
-The full list of calls is in [chat_hm10/hm10_esp32/README.md](chat_hm10/hm10_esp32/README.md).
+All calls are listed in [chat_hm10/hm10_esp32/README.md](chat_hm10/hm10_esp32/README.md). The reasons behind these rules are in [Limits of the link](#limits-of-the-link).
 
 ## Troubleshooting
 
 | Problem | What to do |
 |---------|------------|
-| `init_hm10` prints `Failed to detect HM-10` | Check the wiring: TX goes to RX3 and RX goes to TX3. Check that VCC suits your board (5 V for the course's board, 3.3 V for a bare module). |
-| The chat script keeps printing `ESP32 is DISCONNECTED` and never gets to `Ready!` | The ESP32 has not found the HM-10. A connection normally takes a few seconds. Check that the HM-10 is powered, that `EXPECTED_NAME` matches the name from Part 1, Step 2 exactly, and that nothing else (a phone, another PC) is connected to the HM-10. The script connects by itself once the HM-10 is found. |
-| The chat script prints `No reply from the ESP32`, or `Target mismatch. Current: None` | The script is not talking to an ESP32 with this firmware. Check `PORT`, and check that the ESP32 is flashed. |
-| `connect()` raises `ConnectionError: No reply from the ESP32` | Same cause: wrong serial port, or the ESP32 is not flashed. |
-| `connect()` returns `False`, or never returns | The ESP32 answers but has not found the HM-10. Check the same things as for `ESP32 is DISCONNECTED` above. |
-| `readline()` returns `""` | No complete line arrived in time. Check that the Arduino ends its messages with `\n` (`println`). |
-| `idf.py: command not found` when flashing | The ESP-IDF environment is not loaded in this terminal. See [Flashing the ESP32](#flashing-the-esp32), part 2. |
+| `init_hm10` prints `Failed to detect HM-10` | Check the wiring: TX goes to RX3 and RX goes to TX3. |
+| The chat script prints `No reply from the ESP32`, or `connect()` raises `ConnectionError` | Wrong serial port, or the ESP32 is not flashed. |
+| The chat script stays at `ESP32 is DISCONNECTED`, or `connect()` returns `False` or never returns | The ESP32 has not found the HM-10. Check that the HM-10 is powered, that the name matches exactly, and that no phone or other PC is connected to it. |
+| `readline()` returns `""` | No full line arrived in time. Check that the Arduino ends its messages with `\n` (`println`). |
 | The serial port cannot be opened ("Access is denied", "Resource busy") | Another program has the port open. Close other serial monitors and other copies of the script. |
-| `chat_hm10-bleak.py` prints `Device not found` | Check that Bluetooth is on, the name matches, and the HM-10 is not already connected to an ESP32 or a phone. |
+| `chat_hm10-bleak.py` prints `Device not found` | Check that Bluetooth is on, the name matches, and the ESP32 is unplugged. |
 | Messages do not arrive in the Serial Monitor | Set the Serial Monitor to 115200 baud and keep the `init_hm10` sketch on the Mega. |
 
-To check whether the HM-10 is advertising at all, scan for it with the nRF Connect app on a phone.
+To see whether the HM-10 is advertising at all, scan for it with the nRF Connect app on a phone.
 
 ## For developers
 
@@ -258,6 +229,16 @@ This section is for whoever prepares the hardware or changes the code. To use th
 - **`hm10_bleak`**: the PC's own Bluetooth adapter takes the place of the ESP32. It writes to and gets notifications from `0xFFE1` directly.
 
 Data, AT commands, replies and the ESP32's other logs all share one serial port. `hm10_esp32` therefore depends on the firmware's log format; change the two together.
+
+The chat demo [chat_hm10-esp32.py](chat_hm10/chat_hm10-esp32.py) reads the HM-10 name stored in the ESP32. If it differs from `EXPECTED_NAME`, the script stores the new name and restarts the ESP32. It then asks for the link status once per second until the ESP32 reports that it is connected. `connect()` in `hm10_esp32` does the same.
+
+### Limits of the link
+
+- **Messages arrive in pieces.** The HM-10 sends what the Arduino writes as notifications of at most 20 bytes, and the ESP32 logs each one separately. One `read()` can therefore return part of a message. A `\n` at the end of each message, with `readline()`, puts the pieces back together.
+- **About 250 bytes per second from the PC.** The firmware takes at most 10 bytes from its serial port per cycle, and a cycle takes 25 to 35 ms. This figure is calculated from those two numbers, not measured.
+- **Text only.** `hm10_esp32` decodes what it receives as UTF-8 and drops bytes that are not valid UTF-8.
+- **`OK+CONN` and `OK+LOST` on the Arduino.** `init_hm10` turns on the HM-10's connection notices (`AT+NOTI1`). The HM-10 then prints these strings to the Arduino when a PC connects or disconnects, with no `\n` after them, so they can end up in front of the first message. A sketch can also use them to know when a PC is there.
+- **`OK+` is reserved.** The ESP32 answers AT commands on the same `bt_com` log lines that carry data. `hm10_esp32` treats every payload that starts with `OK+` as such an answer, so data from the Arduino that starts with `OK+` never reaches `read()`.
 
 ### Flashing the ESP32
 
@@ -342,7 +323,9 @@ To check a flashed board, watch its log with `idf.py -p PORT monitor` (exit with
 
 ### Buying HM-10 boards
 
-Check that the board has level shifters on TX and RX. Listings often say only "with base board", and many base boards have a voltage regulator but no level shifter. Ask the seller, or test one board when it arrives: put 5 V on VCC and leave the other pins open. If TX and RX read close to VCC (about 4.3 V on the course's board), the board has level shifters. If they read about 3.3 V, it has none, so add a voltage divider on the Mega's TX3.
+The course's board has the HM-10 module on a black 6-pin base board that takes 5 V on VCC and has level shifters on TX and RX. A bare HM-10 module needs 3.3 V on VCC and a voltage divider between the Mega's TX3 and the module's RX.
+
+When buying, check that the board has level shifters on TX and RX. Listings often say only "with base board", and many base boards have a voltage regulator but no level shifter. Ask the seller, or test one board when it arrives: put 5 V on VCC and leave the other pins open. If TX and RX read close to VCC (about 4.3 V on the course's board), the board has level shifters. If they read about 3.3 V, it has none, so add a voltage divider on the Mega's TX3.
 
 ### Testing
 
